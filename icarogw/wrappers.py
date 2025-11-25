@@ -1628,22 +1628,21 @@ class Johnson():
         y = self.a + self.b * xp.arcsinh(z)
         return 0.5 * (1 + xp_erf(y / xp.sqrt(2)))
 
-    def _log_pdf(self, x, xp):
+    def log_pdf(self, log10_m):
         """
             Log-PDF of the Johnson SU distribution.
             log f(x) = log(b) - log(s) - 0.5 y^2 - log(sqrt(2π)) - 0.5 log(1+z^2)
         """
-        z = (x - self.l) * self.inv_s
-        y = self.a + self.b * xp.arcsinh(z)
-        return ( xp.log(self.b) - self.log_s - 0.5 * y * y + np.log(self.inv_sqrt_2pi) - 0.5 * xp.log1p(z * z) - self.log_norm )
-
-    def log_pdf(self, log10_m):
         xp = get_module_array(log10_m)
-        return self._log_pdf(log10_m, xp)
+        z = (log10_m - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+        logp = xp.log(self.b) - self.log_s - 0.5 * y * y + xp.log(self.inv_sqrt_2pi) - 0.5 * xp.log1p(z * z) - self.log_norm
+        return xp.where( (log10_m < self.mmin) | (log10_m > self.mmax), -xp.inf, logp )
 
     def pdf(self, log10_m):
         xp = get_module_array(log10_m)
-        return xp.exp(self._log_pdf(log10_m, xp))
+        logp = self.log_pdf(log10_m)
+        return xp.exp(logp)
     
 
 class Johnson_cpu():
