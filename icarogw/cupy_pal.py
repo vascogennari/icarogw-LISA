@@ -106,3 +106,26 @@ def iscupy(array):
         return False
 
 
+# Special functions
+import numpy as np
+from scipy.special import (
+    erf as scipy_erf,
+    loggamma as scipy_loggamma,
+)
+
+if CUPY_LOADED:
+    import cupyx.scipy.special as cxs
+else:
+    cxs = None
+
+def xp_erf(x):
+    xp = get_module_array(x)
+    if xp is np:
+        return scipy_erf(x)
+    return cxs.erf(x)
+
+def xp_loggamma(x):
+    xp = get_module_array(x)
+    if xp is np:
+        return scipy_loggamma(x)
+    return cxs.loggamma(x)

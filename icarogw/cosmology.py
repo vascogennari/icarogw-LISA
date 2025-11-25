@@ -1,4 +1,4 @@
-from .cupy_pal import cp2np, np2cp, get_module_array, get_module_array_scipy, iscupy, np, sn, is_there_cupy
+from .cupy_pal import cp2np, np2cp, get_module_array, get_module_array_scipy, iscupy, np, sn, is_there_cupy, xp_loggamma
 from .priors import UniformDistribution, PowerLawStationary
 from icarogw import cupy_pal
 from scipy.integrate import cumulative_trapezoid
@@ -675,14 +675,29 @@ class beta_redshift_probability(basic_redshift_rate):
     Class for a beta distribution for the redshift probability.
     The function needs to be converted into a rate by multiplying by the volume factor.
     '''
-    def __init__(self,a,b,loc,scale):
-        self.a     = a
-        self.b     = b
-        self.loc   = loc
-        self.scale = scale
-    def log_evaluate(self,z):
+    def __init__(self,a_r,b_r,l_r,s_r):
+        self.a = a_r
+        self.b = b_r
+        self.l = l_r
+        self.s = s_r
+
+        # Precompute constants
+        self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)
+        self.a_minus_1 = self.a - 1
+        self.b_minus_1 = self.b - 1
+        self.log_s = np.log(self.s)
+        self.log_norm = 0.0
+
+    def _log_beta_pdf(self, x):
+        xp = get_module_array(x)
+        # Standard Beta log-PDF on [0,1]
+        return ( self.a_minus_1 * xp.log(x) + self.b_minus_1 * xp.log1p(-x) - self.logB )
+
+    def log_evaluate(self, z):
         xp = get_module_array(z)
-        return xp.log(scipy.stats.beta.pdf(z, self.a, self.b, self.loc, self.scale))
+        x = (z - self.l) / self.s
+        logpdf_vals = xp.where((x >= 0) & (x <= 1), self._log_beta_pdf(x) - self.log_s - self.log_norm, -xp.inf)
+        return logpdf_vals
 
 class uniform_redshift_probability(basic_redshift_rate):
     '''

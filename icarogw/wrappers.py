@@ -1,4 +1,4 @@
-from .cupy_pal import get_module_array, get_module_array_scipy, np
+from .cupy_pal import get_module_array, get_module_array_scipy, np, xp_erf, xp_loggamma
 from .cosmology import alphalog_astropycosmology, cM_astropycosmology, extraD_astropycosmology, Xi0_astropycosmology, astropycosmology, eps0_astropycosmology
 from .cosmology import  md_rate, powerlaw_rate, beta_rate, beta_redshift_probability, uniform_redshift_probability, powerlaw_redshift_probability
 from .priors import LowpassSmoothedProb, LowpassSmoothedProbEvolving, PowerLaw, BetaDistribution, TruncatedBetaDistribution, TruncatedGaussian, Bivariate2DGaussian, SmoothedPlusDipProb, BrokenPowerLawMultiPeak
@@ -6,7 +6,8 @@ from .priors import PowerLawGaussian, BrokenPowerLaw, PowerLawTwoGaussians, cond
 from .priors import PowerLawStationary, PowerLawLinear, GaussianStationary, GaussianStationary_truncated, GaussianLinear, DoublePowerlawNoNorm, DoublePowerlawRedshiftNoNorm, UniformDistribution, _mixed_linear_function, _mixed_double_sigmoid_function
 import copy
 from astropy.cosmology import FlatLambdaCDM, FlatwCDM, Flatw0waCDM
-from scipy.stats import gamma, johnsonsu
+from scipy.stats import gamma, johnsonsu, beta
+from math import sqrt, pi
 
 
 # A parent class for the rate
@@ -39,7 +40,7 @@ class rateevolution_beta(rate_default):
 
 class rateevolution_beta_redshift_probability(rate_default):
     def __init__(self):
-        self.population_parameters=['a','b','loc','scale']
+        self.population_parameters=['a_r','b_r','l_r','s_r']
     def update(self,**kwargs):
         self.rate=beta_redshift_probability(**kwargs)
 
@@ -1464,7 +1465,11 @@ class GaussianEvolving():
         self.sigmaz = self.polynomial(self.order, z, 'sigma')
         a, b = (self.mmin - self.muz) / self.sigmaz, (self.mmax - self.muz) / self.sigmaz
         gaussian = xp.log( sx.stats.truncnorm.pdf(m, a, b, loc = self.muz, scale = self.sigmaz) )
-        return gaussian
+
+        if xp.any(self.sigmaz <= 0):
+            return xp.nan
+        else:
+            return gaussian
 
     def pdf(self, m, z):
         xp = get_module_array(m)
@@ -1594,21 +1599,72 @@ class Johnson():
     """
         Class for the mass ratio distribution as a Johnsonsu distribution.
         The PDF takes as input the log10 logarithm of the primary mass.
+    """
+    def __init__(self):
+        self.population_parameters = ['a_j', 'b_j', 'l_j', 's_j', 'mmin_j', 'mmax_j']
+
+    def update(self,**kwargs):
+        self.a = kwargs["a_j"]
+        self.b = kwargs["b_j"]
+        self.l = kwargs["l_j"]
+        self.s = kwargs["s_j"]
+        self.mmin = kwargs["mmin_j"]
+        self.mmax = kwargs["mmax_j"]
+
+        # Precompute constants
+        self.inv_s = 1.0 / self.s
+        self.log_s = np.log(self.s)
+        self.inv_sqrt_2pi = 1.0 / np.sqrt(2 * np.pi)
+
+        # Precompute normalization
+        xp = get_module_array(np.array(0.0))
+        cdf_min = self._cdf_scalar(self.mmin, xp)
+        cdf_max = self._cdf_scalar(self.mmax, xp)
+        self.norm = cdf_max - cdf_min
+        self.log_norm = np.log(self.norm)
+
+    def _cdf_scalar(self, x, xp):
+        z = (x - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+        return 0.5 * (1 + xp_erf(y / xp.sqrt(2)))
+
+    def _log_pdf(self, x, xp):
+        """
+            Log-PDF of the Johnson SU distribution.
+            log f(x) = log(b) - log(s) - 0.5 y^2 - log(sqrt(2π)) - 0.5 log(1+z^2)
+        """
+        z = (x - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+        return ( xp.log(self.b) - self.log_s - 0.5 * y * y + np.log(self.inv_sqrt_2pi) - 0.5 * xp.log1p(z * z) - self.log_norm )
+
+    def log_pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        return self._log_pdf(log10_m, xp)
+
+    def pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        return xp.exp(self._log_pdf(log10_m, xp))
+    
+
+class Johnson_cpu():
+    """
+        Class for the mass ratio distribution as a Johnsonsu distribution.
+        The PDF takes as input the log10 logarithm of the primary mass.
         https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.johnsonsu.html#scipy.stats.johnsonsu
     """
     def __init__(self):
-        self.population_parameters = ['a_johnson', 'b_johnson', 'loc_johnson', 'scale_johnson', 'mmin_johnson', 'mmax_johnson']
+        self.population_parameters = ['a_j', 'b_j', 'l_j', 's_j', 'mmin_j', 'mmax_j']
 
     def update(self,**kwargs):
-        self.a_johnson = kwargs['a_johnson']
-        self.b_johnson = kwargs['b_johnson']
-        self.loc       = kwargs['loc_johnson']
-        self.scale     = kwargs['scale_johnson']
-        self.mmin      = kwargs['mmin_johnson']
-        self.mmax      = kwargs['mmax_johnson']
+        self.a_j = kwargs['a_j']
+        self.b_j = kwargs['b_j']
+        self.l_j = kwargs['l_j']
+        self.s_j = kwargs['s_j']
+        self.mmin = kwargs['mmin_j']
+        self.mmax = kwargs['mmax_j']
 
     def pdf(self,log10_m):
-        dist = johnsonsu(a = self.a_johnson, b = self.b_johnson, loc = self.loc, scale = self.scale)
+        dist = johnsonsu(a = self.a_j, b = self.b_j, loc = self.l_j, scale = self.s_j)
         norm = dist.cdf(self.mmax) - dist.cdf(self.mmin) # Compute the mass over [mmin, mmax]
         return dist.pdf(log10_m) / norm
 
@@ -1636,6 +1692,40 @@ class Gamma():
     def log_pdf(self,log10_q):
         xp = get_module_array(log10_q)
         return xp.log(self.pdf(log10_q))
+
+
+class Beta():
+    '''
+        Class for the mass ratio distribution as a Beta distribution.
+        The PDF takes as input the log10 logarithm of the mass ratio.
+    '''
+    def __init__(self):
+        self.population_parameters = ['a_b', 'b_b', 'l_b', 's_b']
+
+    def update(self,**kwargs):
+        self.a = kwargs['a_b']
+        self.b = kwargs['b_b']
+        self.l = kwargs['l_b']
+        self.s = kwargs['s_b']
+
+        self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)
+
+    def _log_beta_pdf(self, x):
+        xp = get_module_array(x)
+        # Standard Beta log-PDF on [0,1]
+        return ( (self.a - 1) * xp.log(x) + (self.b - 1) * xp.log1p(-x) - self.logB )
+
+    def pdf(self, log10_q):
+        xp = get_module_array(log10_q)
+        x = (log10_q - self.l) / self.s # Shift and scale
+        pdf_vals = xp.where((x >= 0) & (x <= 1), xp.exp(self._log_beta_pdf(x)) / self.s, 0.0)
+        return pdf_vals
+
+    def log_pdf(self, log10_q):
+        xp = get_module_array(log10_q)
+        x = (log10_q - self.l) / self.s # Shift and scale
+        logpdf_vals = xp.where((x >= 0) & (x <= 1), self._log_beta_pdf(x) - xp.log(self.s), -xp.inf)
+        return logpdf_vals
 
 
 class DoublePowerlaw_Gaussian():
