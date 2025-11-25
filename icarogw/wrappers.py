@@ -40,7 +40,7 @@ class rateevolution_beta(rate_default):
 
 class rateevolution_beta_redshift_probability(rate_default):
     def __init__(self):
-        self.population_parameters=['low_b_r','high_b_r','peak_b_r','scale_b_r']
+        self.population_parameters=['low_b_r','high_b_r','start_b_r','scale_b_r']
     def update(self,**kwargs):
         self.rate=beta_redshift_probability(**kwargs)
 
@@ -1672,12 +1672,12 @@ class Beta():
         The PDF takes as input the log10 logarithm of the mass ratio.
     '''
     def __init__(self):
-        self.population_parameters = ['low_b', 'high_b', 'peak_b', 'scale_b']
+        self.population_parameters = ['low_b', 'high_b', 'start_b', 'scale_b']
 
     def update(self,**kwargs):
         self.a = kwargs['low_b']
         self.b = kwargs['high_b']
-        self.l = kwargs['peak_b']
+        self.l = kwargs['start_b']
         self.s = kwargs['scale_b']
 
         self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)

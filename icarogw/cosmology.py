@@ -675,10 +675,10 @@ class beta_redshift_probability(basic_redshift_rate):
     Class for a beta distribution for the redshift probability.
     The function needs to be converted into a rate by multiplying by the volume factor.
     '''
-    def __init__(self,low_b_r,high_b_r,peak_b_r,scale_b_r):
+    def __init__(self,low_b_r,high_b_r,start_b_r,scale_b_r):
         self.a = low_b_r
         self.b = high_b_r
-        self.l = peak_b_r
+        self.l = start_b_r
         self.s = scale_b_r
 
         # Precompute constants
