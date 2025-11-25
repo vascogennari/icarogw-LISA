@@ -1643,33 +1643,6 @@ class Johnson():
         xp = get_module_array(log10_m)
         logp = self.log_pdf(log10_m)
         return xp.exp(logp)
-    
-
-class Johnson_cpu():
-    """
-        Class for the mass ratio distribution as a Johnsonsu distribution.
-        The PDF takes as input the log10 logarithm of the primary mass.
-        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.johnsonsu.html#scipy.stats.johnsonsu
-    """
-    def __init__(self):
-        self.population_parameters = ['a_j', 'b_j', 'l_j', 's_j', 'mmin_j', 'mmax_j']
-
-    def update(self,**kwargs):
-        self.a_j = kwargs['a_j']
-        self.b_j = kwargs['b_j']
-        self.l_j = kwargs['l_j']
-        self.s_j = kwargs['s_j']
-        self.mmin = kwargs['mmin_j']
-        self.mmax = kwargs['mmax_j']
-
-    def pdf(self,log10_m):
-        dist = johnsonsu(a = self.a_j, b = self.b_j, loc = self.l_j, scale = self.s_j)
-        norm = dist.cdf(self.mmax) - dist.cdf(self.mmin) # Compute the mass over [mmin, mmax]
-        return dist.pdf(log10_m) / norm
-
-    def log_pdf(self,log10_m):
-        xp = get_module_array(log10_m)
-        return xp.log(self.pdf(log10_m))
 
 
 class Gamma():
