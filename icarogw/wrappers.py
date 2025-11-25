@@ -40,7 +40,7 @@ class rateevolution_beta(rate_default):
 
 class rateevolution_beta_redshift_probability(rate_default):
     def __init__(self):
-        self.population_parameters=['a_r','b_r','l_r','s_r']
+        self.population_parameters=['low_b_r','high_b_r','peak_b_r','scale_b_r']
     def update(self,**kwargs):
         self.rate=beta_redshift_probability(**kwargs)
 
@@ -1601,13 +1601,13 @@ class Johnson():
         The PDF takes as input the log10 logarithm of the primary mass.
     """
     def __init__(self):
-        self.population_parameters = ['a_j', 'b_j', 'l_j', 's_j', 'mmin_j', 'mmax_j']
+        self.population_parameters = ['skew_j', 'sharp_j', 'peak_j', 'scale_j', 'mmin_j', 'mmax_j']
 
     def update(self,**kwargs):
-        self.a = kwargs["a_j"]
-        self.b = kwargs["b_j"]
-        self.l = kwargs["l_j"]
-        self.s = kwargs["s_j"]
+        self.a = kwargs["skew_j"]
+        self.b = kwargs["sharp_j"]
+        self.l = kwargs["peak_j"]
+        self.s = kwargs["scale_j"]
         self.mmin = kwargs["mmin_j"]
         self.mmax = kwargs["mmax_j"]
 
@@ -1700,13 +1700,13 @@ class Beta():
         The PDF takes as input the log10 logarithm of the mass ratio.
     '''
     def __init__(self):
-        self.population_parameters = ['a_b', 'b_b', 'l_b', 's_b']
+        self.population_parameters = ['low_b', 'high_b', 'peak_b', 'scale_b']
 
     def update(self,**kwargs):
-        self.a = kwargs['a_b']
-        self.b = kwargs['b_b']
-        self.l = kwargs['l_b']
-        self.s = kwargs['s_b']
+        self.a = kwargs['low_b']
+        self.b = kwargs['high_b']
+        self.l = kwargs['peak_b']
+        self.s = kwargs['scale_b']
 
         self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)
 
