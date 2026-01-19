@@ -1,8 +1,9 @@
-from .cupy_pal import cp2np, np2cp, get_module_array, get_module_array_scipy, iscupy, np, sn, is_there_cupy
+from .cupy_pal import cp2np, np2cp, get_module_array, get_module_array_scipy, iscupy, np, sn, is_there_cupy, xp_loggamma
+from .priors import UniformDistribution, PowerLawStationary
 from icarogw import cupy_pal
 from scipy.integrate import cumulative_trapezoid
 import mpmath
-import scipy.stats, scipy.misc
+import scipy.stats
 
 COST_C= 299792.458 # Speed of light in km/s
 
@@ -657,23 +658,6 @@ class md_rate(basic_redshift_rate):
     def log_evaluate(self,z):
         xp = get_module_array(z)
         return xp.log1p(xp.power(1+self.zp,-self.gamma-self.kappa))+self.gamma*xp.log1p(z)-xp.log1p(xp.power((1+z)/(1+self.zp),self.gamma+self.kappa))
-    
-class md_gamma_rate(basic_redshift_rate):
-    '''
-    Class for a MD + gamma distribution redshift rate
-    '''
-    def __init__(self, gamma, kappa, zp, a, b, c):
-        self.gamma = gamma
-        self.kappa = kappa
-        self.zp    = zp
-        self.a     = a
-        self.b     = b
-        self.c     = c
-    def log_evaluate(self,z):
-        xp = get_module_array(z)
-        md_dist    = xp.log1p(xp.power(1+self.zp,-self.gamma-self.kappa))+self.gamma*xp.log1p(z)-xp.log1p(xp.power((1+z)/(1+self.zp),self.gamma+self.kappa))
-        gamma_dist = self.c * scipy.stats.gamma.pdf(self.b * z, self.a)
-        return md_dist + gamma_dist
 
 class beta_rate():
     '''
@@ -686,33 +670,60 @@ class beta_rate():
     def log_evaluate(self,z):
         return self.c * scipy.stats.beta.pdf(z, self.a, self.b)    # We want the log(rate) to be a beta distribution
 
-class beta_rate_line():
+class beta_redshift_probability(basic_redshift_rate):
     '''
-    Class for a beta distribution redshift rate with a line C1 attached from z=d
+    Class for a beta distribution for the redshift probability.
+    The function needs to be converted into a rate by multiplying by the volume factor.
     '''
-    def __init__(self,a,b,c,d):
-        self.a = a
-        self.b = b
-        self.c = c
-        self.d = d
-    def beta_array(self,z):
-        return self.c * scipy.stats.beta.pdf(z, self.a, self.b)    # We want the log(rate) to be a beta distribution
-    def log_evaluate(self,z):
+    def __init__(self,low_b_r,high_b_r,start_b_r,scale_b_r):
+        self.a = low_b_r
+        self.b = high_b_r
+        self.l = start_b_r
+        self.s = scale_b_r
+
+        # Precompute constants
+        self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)
+        self.a_minus_1 = self.a - 1
+        self.b_minus_1 = self.b - 1
+        self.log_s = np.log(self.s)
+        self.log_norm = 0.0
+
+    def _log_beta_pdf(self, x):
+        xp = get_module_array(x)
+        # Standard Beta log-PDF on [0,1]
+        return ( self.a_minus_1 * xp.log(x) + self.b_minus_1 * xp.log1p(-x) - self.logB )
+
+    def log_evaluate(self, z):
         xp = get_module_array(z)
-        left = self.beta_array(z)
-        right = scipy.misc.derivative(self.beta_array, self.d, dx=1e-6) * (z - self.d) + self.beta_array(self.d)
-        if z.ndim == 1:
-            res = xp.empty(len(z))
-            idx = xp.array([z <= self.d]).sum()  
-            res[:idx] = left[ z <= self.d]
-            res[idx:] = right[z >  self.d]
-        else:
-            res = xp.empty((len(z), len(z[0])))
-            for i,zi in enumerate(z):
-                idx = xp.array([zi <= self.d]).sum()
-                res[i][:idx] = left[i][ zi <= self.d]
-                res[i][idx:] = right[i][zi >  self.d]
-        return res
+        x = (z - self.l) / self.s
+        logpdf_vals = xp.where((x >= 0) & (x <= 1), self._log_beta_pdf(x) - self.log_s - self.log_norm, -xp.inf)
+        return logpdf_vals
+
+class uniform_redshift_probability(basic_redshift_rate):
+    '''
+    Class for a uniform distribution for the redshift probability.
+    The function needs to be converted into a rate by multiplying by the volume factor.
+    '''
+    def __init__(self,z_min,z_max):
+        self.z_min = z_min
+        self.z_max = z_max
+
+    def log_evaluate(self,z):
+        tmp = UniformDistribution(self.z_min, self.z_max)
+        return tmp.log_pdf(z)
+    
+class powerlaw_redshift_probability(basic_redshift_rate):
+    '''
+    Class for a powerlaw distribution for the redshift probability.
+    The function needs to be converted into a rate by multiplying by the volume factor.
+    '''
+    def __init__(self,gamma, z_min, z_max):
+        self.gamma=abs(gamma)
+        self.z_min=z_min
+        self.z_max=z_max
+    def log_evaluate(self,z):
+        tmp = PowerLawStationary(-self.gamma, self.z_min, self.z_max)
+        return tmp.log_pdf(z)
 
 # LVK Reviewed
 class basic_absM_rate(object):

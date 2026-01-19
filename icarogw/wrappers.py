@@ -1,12 +1,14 @@
-from .cupy_pal import get_module_array, get_module_array_scipy, np
+from .cupy_pal import get_module_array, get_module_array_scipy, np, xp_erf, xp_loggamma
 from .cosmology import alphalog_astropycosmology, cM_astropycosmology, extraD_astropycosmology, Xi0_astropycosmology, astropycosmology, eps0_astropycosmology
-from .cosmology import  md_rate, md_gamma_rate, powerlaw_rate, beta_rate, beta_rate_line
+from .cosmology import  md_rate, powerlaw_rate, beta_rate, beta_redshift_probability, uniform_redshift_probability, powerlaw_redshift_probability
 from .priors import LowpassSmoothedProb, LowpassSmoothedProbEvolving, PowerLaw, BetaDistribution, TruncatedBetaDistribution, TruncatedGaussian, Bivariate2DGaussian, SmoothedPlusDipProb, BrokenPowerLawMultiPeak
 from .priors import PowerLawGaussian, BrokenPowerLaw, PowerLawTwoGaussians, conditional_2dimpdf, conditional_2dimz_pdf, piecewise_constant_2d_distribution_normalized,paired_2dimpdf
-from .priors import PowerLawStationary, PowerLawLinear, GaussianStationary, GaussianLinear, _mixed_linear_function, _mixed_double_sigmoid_function
+from .priors import PowerLawStationary, PowerLawLinear, GaussianStationary, GaussianStationary_truncated, GaussianLinear, DoublePowerlawNoNorm, DoublePowerlawRedshiftNoNorm, UniformDistribution, _mixed_linear_function, _mixed_double_sigmoid_function
 from .priors import BrokenPowerLawTripleMultiPeak
 import copy
 from astropy.cosmology import FlatLambdaCDM, FlatwCDM, Flatw0waCDM
+from scipy.stats import gamma, johnsonsu, beta
+from math import sqrt, pi
 
 modgravity_wrappers = ['eps0_mod_wrap','Xi0_mod_wrap','extraD_mod_wrap',
                       'cM_mod_wrap','alphalog_mod_wrap']
@@ -15,7 +17,6 @@ modgravity_wrappers = ['eps0_mod_wrap','Xi0_mod_wrap','extraD_mod_wrap',
 lcdm_wrappers = ['FlatLambdaCDM_wrap','FlatwCDM_wrap',
                 'Flatw0waCDM_wrap']
 
-    
 # A parent class for the rate
 # LVK Reviewed
 class rate_default(object):
@@ -38,23 +39,29 @@ class rateevolution_Madau(rate_default):
     def update(self,**kwargs):
         self.rate=md_rate(**kwargs)
 
-class rateevolution_Madau_gamma(rate_default):
-    def __init__(self):
-        self.population_parameters=['gamma','kappa','zp','a','b','c']
-    def update(self,**kwargs):
-        self.rate=md_gamma_rate(**kwargs)
-
 class rateevolution_beta(rate_default):
     def __init__(self):
         self.population_parameters=['a','b','c']
     def update(self,**kwargs):
         self.rate=beta_rate(**kwargs)
 
-class rateevolution_beta_line(rate_default):
+class rateevolution_beta_redshift_probability(rate_default):
     def __init__(self):
-        self.population_parameters=['a','b','c','d']
+        self.population_parameters=['low_b_r','high_b_r','start_b_r','scale_b_r']
     def update(self,**kwargs):
-        self.rate=beta_rate_line(**kwargs)
+        self.rate=beta_redshift_probability(**kwargs)
+
+class rateevolution_uniform_redshift_probability(rate_default):
+    def __init__(self):
+        self.population_parameters=['z_min','z_max']
+    def update(self,**kwargs):
+        self.rate=uniform_redshift_probability(**kwargs)
+
+class rateevolution_powerlaw_redshift_probability(rate_default):
+    def __init__(self):
+        self.population_parameters=['z_min','z_max', 'gamma']
+    def update(self,**kwargs):
+        self.rate=powerlaw_redshift_probability(**kwargs)
 
 
 # LVK Reviewed
@@ -1523,12 +1530,14 @@ class GaussianEvolving():
         self.order = order
         mu_list    = ['mu_z{}'.format(   i) for i in range(order + 1)]
         sigma_list = ['sigma_z{}'.format(i) for i in range(order + 1)]
-        self.population_parameters = mu_list + sigma_list
+        self.population_parameters = mu_list + sigma_list + ['mmin', 'mmax']
 
     def update(self, **kwargs):
 
         for par in kwargs.keys():
             globals()['self.%s' % par] = kwargs[par]
+        self.mmin = kwargs['mmin']
+        self.mmax = kwargs['mmax']
 
     def polynomial(self, expansion_order, x, variable):
         
@@ -1544,9 +1553,13 @@ class GaussianEvolving():
         sx = get_module_array_scipy(m)
         self.muz    = self.polynomial(self.order, z, 'mu')
         self.sigmaz = self.polynomial(self.order, z, 'sigma')
-        a, b = (0. - self.muz) / self.sigmaz, (self.muz + 6*self.muz - self.muz) / self.sigmaz  # Truncte the Gaussian at zero and mu+6*sigma. This improve the numerical stability.
+        a, b = (self.mmin - self.muz) / self.sigmaz, (self.mmax - self.muz) / self.sigmaz
         gaussian = xp.log( sx.stats.truncnorm.pdf(m, a, b, loc = self.muz, scale = self.sigmaz) )
-        return gaussian
+
+        if xp.any(self.sigmaz <= 0):
+            return xp.nan
+        else:
+            return gaussian
 
     def pdf(self, m, z):
         xp = get_module_array(m)
@@ -1554,3 +1567,261 @@ class GaussianEvolving():
     
     def return_mu_sigma(self):
         return self.muz, self.sigmaz
+    
+
+class Uniform():
+
+    def __init__(self):
+        self.population_parameters = ['mmin', 'mmax']
+
+    def update(self,**kwargs):
+        self.mmin = kwargs['mmin']
+        self.mmax = kwargs['mmax']
+
+    def pdf(self,m):
+        tmp = UniformDistribution(self.mmin, self.mmax)
+        return tmp.pdf(m)
+
+    def log_pdf(self,m):
+        xp = get_module_array(m)
+        return xp.log(self.pdf(m))
+    
+
+class Gaussian():
+
+    def __init__(self):
+        self.population_parameters = ['mu', 'sigma', 'mmin', 'mmax']
+
+    def update(self,**kwargs):
+        self.mu    = kwargs['mu']
+        self.sigma = kwargs['sigma']
+        self.mmin  = kwargs['mmin']
+        self.mmax  = kwargs['mmax']
+
+    def pdf(self,m):
+        tmp = TruncatedGaussian(self.mu, self.sigma, self.mmin, self.mmax)
+        return tmp.pdf(m)
+
+    def log_pdf(self,m):
+        xp = get_module_array(m)
+        return xp.log(self.pdf(m))
+
+
+# ----------- #
+# LISA models #
+# ----------- #
+
+class DoublePowerlaw():
+    """
+        Class for the primary mass distribution as two powerlaws smoothly attached at a brake point.
+        The PDF takes as input the log10 logarithm of the mass.
+    """
+    def __init__(self):
+        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'm_b', 'delta']
+
+    def update(self, **kwargs):
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+    def pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        dpl_no_norm = DoublePowerlawNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.m_b, self.delta)
+        x = xp.linspace(self.mmin, self.mmax, 1000)
+        try:
+            norm = xp.trapz(dpl_no_norm._pdf(x), x)
+            return dpl_no_norm._pdf(log10_m) / norm
+        except:
+            # If the normalization fails, return NaN
+            return xp.nan
+
+    def log_pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        return xp.log(self.pdf(log10_m))
+
+
+class DoublePowerlawRedshift():
+    """
+        Class for the primary mass distribution as two powerlaws smoothly attached at a brake point.
+        The PDF takes as input the log10 logarithm of the mass.
+    """
+    def __init__(self, redshift_transition = 'linear'):
+        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'delta']
+        self.redshift_transition   = redshift_transition
+        if   self.redshift_transition == 'linear':
+            self.population_parameters += ['m_b_z0', 'm_b_z10']
+        elif self.redshift_transition == 'sigmoid':
+            self.population_parameters += ['m_b_z0', 'm_b_z10', 'm_b_zt', 'm_b_delta_zt']
+
+    def update(self, **kwargs):
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+    def pdf(self, log10_m, z):
+        xp = get_module_array(log10_m)
+
+        if   self.redshift_transition == 'linear':
+            m_b = self.m_b_z0  + (self.m_b_z10 - self.m_b_z0) * z / 10
+        elif self.redshift_transition == 'sigmoid':
+            m_b = self.m_b_z10 + (self.m_b_z0 - self.m_b_z10) / (1 + np.exp((z - self.m_b_zt) / self.m_b_delta_zt))
+
+        # Evaluate unnormalized PDF pointwise
+        dpl_no_norm = DoublePowerlawRedshiftNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.delta)
+        unnorm = dpl_no_norm._pdf(log10_m, m_b)
+
+        # Normalize by integrating PDF over full support for each z
+        x = xp.linspace(self.mmin, self.mmax, 1000)
+        x_tile = xp.tile(x, (log10_m.shape[0], 1))  # shape (N, 1000)
+        m_b_tile = xp.tile(m_b[:, xp.newaxis], (1, 1000))
+        unnorm_full = dpl_no_norm._pdf(x_tile, m_b_tile)
+        try:
+            norm = xp.trapz(unnorm_full, x, axis=1)
+            return unnorm / norm
+        except:
+            # If the normalization fails, return NaN
+            return xp.nan
+
+    def log_pdf(self, log10_m, z):
+        xp = get_module_array(log10_m)
+        return xp.log(self.pdf(log10_m, z))
+
+
+class Johnson():
+    """
+        Class for the mass ratio distribution as a Johnsonsu distribution.
+        The PDF takes as input the log10 logarithm of the primary mass.
+    """
+    def __init__(self):
+        self.population_parameters = ['skew_j', 'sharp_j', 'peak_j', 'scale_j', 'mmin_j', 'mmax_j']
+
+    def update(self,**kwargs):
+        self.a = kwargs["skew_j"]
+        self.b = kwargs["sharp_j"]
+        self.l = kwargs["peak_j"]
+        self.s = kwargs["scale_j"]
+        self.mmin = kwargs["mmin_j"]
+        self.mmax = kwargs["mmax_j"]
+
+        # Precompute constants
+        self.inv_s = 1.0 / self.s
+        self.log_s = np.log(self.s)
+        self.inv_sqrt_2pi = 1.0 / np.sqrt(2 * np.pi)
+
+        # Precompute normalization
+        xp = get_module_array(np.array(0.0))
+        cdf_min = self._cdf_scalar(self.mmin, xp)
+        cdf_max = self._cdf_scalar(self.mmax, xp)
+        self.norm = cdf_max - cdf_min
+        self.log_norm = np.log(self.norm)
+
+    def _cdf_scalar(self, x, xp):
+        z = (x - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+        return 0.5 * (1 + xp_erf(y / xp.sqrt(2)))
+
+    def log_pdf(self, log10_m):
+        """
+            Log-PDF of the Johnson SU distribution.
+            log f(x) = log(b) - log(s) - 0.5 y^2 - log(sqrt(2π)) - 0.5 log(1+z^2)
+        """
+        xp = get_module_array(log10_m)
+        z = (log10_m - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+        logp = xp.log(self.b) - self.log_s - 0.5 * y * y + xp.log(self.inv_sqrt_2pi) - 0.5 * xp.log1p(z * z) - self.log_norm
+        return xp.where( (log10_m < self.mmin) | (log10_m > self.mmax), -xp.inf, logp )
+
+    def pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        logp = self.log_pdf(log10_m)
+        return xp.exp(logp)
+
+
+class Gamma():
+    """
+        Class for the mass ratio distribution as a Gamma distribution.
+        The PDF takes as input the log10 logarithm of the mass ratio.
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gamma.html#scipy.stats.gamma
+    """
+    def __init__(self):
+        self.population_parameters = ['a_gamma', 'theta']
+
+    def update(self,**kwargs):
+        self.a_gamma = kwargs['a_gamma']
+        self.theta   = kwargs['theta']
+
+    def pdf(self,log10_q):
+        return gamma.pdf(log10_q, a = self.a_gamma, scale = self.theta)
+
+    def log_pdf(self,log10_q):
+        xp = get_module_array(log10_q)
+        return xp.log(self.pdf(log10_q))
+
+
+class Beta():
+    '''
+        Class for the mass ratio distribution as a Beta distribution.
+        The PDF takes as input the log10 logarithm of the mass ratio.
+    '''
+    def __init__(self):
+        self.population_parameters = ['low_b', 'high_b', 'start_b', 'scale_b']
+
+    def update(self,**kwargs):
+        self.a = kwargs['low_b']
+        self.b = kwargs['high_b']
+        self.l = kwargs['start_b']
+        self.s = kwargs['scale_b']
+
+        self.logB = xp_loggamma(self.a) + xp_loggamma(self.b) - xp_loggamma(self.a + self.b)
+
+    def _log_beta_pdf(self, x):
+        xp = get_module_array(x)
+        # Standard Beta log-PDF on [0,1]
+        return ( (self.a - 1) * xp.log(x) + (self.b - 1) * xp.log1p(-x) - self.logB )
+
+    def pdf(self, log10_q):
+        xp = get_module_array(log10_q)
+        x = (log10_q - self.l) / self.s # Shift and scale
+        pdf_vals = xp.where((x >= 0) & (x <= 1), xp.exp(self._log_beta_pdf(x)) / self.s, 0.0)
+        return pdf_vals
+
+    def log_pdf(self, log10_q):
+        xp = get_module_array(log10_q)
+        x = (log10_q - self.l) / self.s # Shift and scale
+        logpdf_vals = xp.where((x >= 0) & (x <= 1), self._log_beta_pdf(x) - xp.log(self.s), -xp.inf)
+        return logpdf_vals
+
+
+class DoublePowerlaw_Gaussian():
+    """
+        Class for the primary mass distribution as two powerlaws smoothly attached at a brake point,
+        plus a Gaussian peak.
+        The PDF takes as input the log10 logarithm of the mass.
+    """
+    def __init__(self):
+        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'm_b', 'delta', 'mu_g', 'sigma_g', 'mix']
+
+    def update(self, **kwargs):
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+    def pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        dpl_no_norm_class = DoublePowerlawNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.m_b, self.delta)
+        gaussian_class    = GaussianStationary_truncated(self.mu_g, self.sigma_g, self.mmin, self.mmax)
+        x = xp.linspace(self.mmin, self.mmax, 1000)
+        gaussian_part = gaussian_class.pdf(log10_m)
+        try:
+            norm = xp.trapz(dpl_no_norm_class._pdf(x), x)
+            dpl_part = dpl_no_norm_class._pdf(log10_m) / norm
+        except:
+            # If the normalization fails, return NaN
+            dpl_part = xp.nan
+
+        # Impose the rate to be between [0,1].
+        if (self.mix > 1) or (self.mix < 0):
+            return xp.nan
+        else:
+            return self.mix * dpl_part + (1-self.mix) * gaussian_part
+
+    def log_pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        return xp.log(self.pdf(log10_m))
