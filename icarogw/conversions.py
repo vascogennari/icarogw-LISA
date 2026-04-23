@@ -990,7 +990,7 @@ def detector2source_jacobian_EMRI(z, ms1, cosmology):
     '''
     Calculates the detector frame to source frame Jacobian d_det/d_sour.
 
-    |J_d->s| = |J_(m1d, dL)->(log(m1s), z)| = (1+z) ddL/dz m1s/log10(e)^2
+    |J_d->s| = |J_(m1d, dL)->(log(m1s), z)| = (1+z) ddL/dz m1s/log10(e)
 
     Parameters
     ----------
@@ -1002,5 +1002,5 @@ def detector2source_jacobian_EMRI(z, ms1, cosmology):
             Cosmology class from the cosmology module
     '''
     xp = get_module_array(z)
-    const = xp.power(xp.log10(xp.e), 2)
+    const = xp.log10(xp.e)
     return xp.abs( (1+z) * cosmology.ddl_by_dz_at_z(z) * ms1 * 1/const)
