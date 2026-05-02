@@ -2189,7 +2189,7 @@ class EMRI_rate_no_q(object):
         # Compute the weights for the samples Monte Carlo integral, Eq.3 of [2305.17973].
         # w = 1/prior_d dN/(dm1d ddL dtd) = 1/prior_d dN/(dlog(m1s) dVc dts) 1/|J_d->s| 1/1+z dVc/dz
         # dN/(dlog(m1s) dVc dts) = R(z) p_pop(log(m1s))
-        log_weights = self.mw.log_pdf(xp.log10(ms1)) + self.qw.log_pdf(xp.log10(kwargs['mass_ratio'])) + self.rw.rate.log_evaluate(z) + log_dVc_dz \
+        log_weights = self.mw.log_pdf(xp.log10(ms1)) + self.rw.rate.log_evaluate(z) + log_dVc_dz \
         - xp.log(prior) - xp.log(detector2source_jacobian_EMRI(z, ms1, self.cw.cosmology)) - xp.log1p(z)
 
         if not self.scale_free: log_out = log_weights + xp.log(self.R0)
