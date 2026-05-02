@@ -1617,7 +1617,7 @@ class DoublePowerlaw():
         The PDF takes as input the log10 logarithm of the mass.
     """
     def __init__(self):
-        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'm_b', 'delta']
+        self.population_parameters = ['alpha_dpl', 'beta_dpl', 'mmin_dpl', 'mmax_dpl', 'm_break_dpl', 'delta_dpl']
 
     def update(self, **kwargs):
         for param in self.population_parameters:
@@ -1625,8 +1625,8 @@ class DoublePowerlaw():
 
     def pdf(self, log10_m):
         xp = get_module_array(log10_m)
-        dpl_no_norm = DoublePowerlawNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.m_b, self.delta)
-        x = xp.linspace(self.mmin, self.mmax, 1000)
+        dpl_no_norm = DoublePowerlawNoNorm(self.alpha_dpl, self.beta_dpl, self.mmin_dpl, self.mmax_dpl, self.m_break_dpl, self.delta_dpl)
+        x = xp.linspace(self.mmin_dpl, self.mmax_dpl, 1000)
         try:
             norm = xp.trapz(dpl_no_norm._pdf(x), x)
             return dpl_no_norm._pdf(log10_m) / norm
@@ -1639,18 +1639,55 @@ class DoublePowerlaw():
         return xp.log(self.pdf(log10_m))
 
 
+class DoublePowerlaw_Gaussian():
+    """
+        Class for the primary mass distribution as two powerlaws smoothly attached at a brake point,
+        plus a Gaussian peak.
+        The PDF takes as input the log10 logarithm of the mass.
+    """
+    def __init__(self):
+        self.population_parameters = ['alpha_dpl', 'beta_dpl', 'mmin_dpl', 'mmax_dpl', 'm_break_dpl', 'delta_dpl', 'mu_g_dpl', 'sigma_g_dpl', 'mix_dpl']
+
+    def update(self, **kwargs):
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+    def pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        dpl_no_norm_class = DoublePowerlawNoNorm(self.alpha_dpl, self.beta_dpl, self.mmin_dpl, self.mmax_dpl, self.m_break_dpl, self.delta_dpl)
+        gaussian_class    = GaussianStationary_truncated(self.mu_g_dpl, self.sigma_g_dpl, self.mmin_dpl, self.mmax_dpl)
+        x = xp.linspace(self.mmin_dpl, self.mmax_dpl, 1000)
+        gaussian_part = gaussian_class.pdf(log10_m)
+        try:
+            norm = xp.trapz(dpl_no_norm_class._pdf(x), x)
+            dpl_part = dpl_no_norm_class._pdf(log10_m) / norm
+        except:
+            # If the normalization fails, return NaN
+            dpl_part = xp.nan
+
+        # Impose the rate to be between [0,1].
+        if (self.mix > 1) or (self.mix < 0):
+            return xp.nan
+        else:
+            return self.mix * dpl_part + (1-self.mix) * gaussian_part
+
+    def log_pdf(self, log10_m):
+        xp = get_module_array(log10_m)
+        return xp.log(self.pdf(log10_m))
+
+
 class DoublePowerlawRedshift():
     """
         Class for the primary mass distribution as two powerlaws smoothly attached at a brake point.
         The PDF takes as input the log10 logarithm of the mass.
     """
     def __init__(self, redshift_transition = 'linear'):
-        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'delta']
+        self.population_parameters = ['alpha_dpl', 'beta_dpl', 'mmin_dpl', 'mmax_dpl', 'delta_dpl']
         self.redshift_transition   = redshift_transition
         if   self.redshift_transition == 'linear':
-            self.population_parameters += ['m_b_z0', 'm_b_z10']
+            self.population_parameters += ['m_break_z0_dpl', 'm_break_z10_dpl']
         elif self.redshift_transition == 'sigmoid':
-            self.population_parameters += ['m_b_z0', 'm_b_z10', 'm_b_zt', 'm_b_delta_zt']
+            self.population_parameters += ['m_break_z0_dpl', 'm_break_z10_dpl', 'm_break_zt_dpl', 'm_break_delta_zt_dpl']
 
     def update(self, **kwargs):
         for param in self.population_parameters:
@@ -1660,16 +1697,16 @@ class DoublePowerlawRedshift():
         xp = get_module_array(log10_m)
 
         if   self.redshift_transition == 'linear':
-            m_b = self.m_b_z0  + (self.m_b_z10 - self.m_b_z0) * z / 10
+            m_b = self.m_break_z0_dpl  + (self.m_break_z10_dpl - self.m_break_z0_dpl) * z / 10
         elif self.redshift_transition == 'sigmoid':
-            m_b = self.m_b_z10 + (self.m_b_z0 - self.m_b_z10) / (1 + np.exp((z - self.m_b_zt) / self.m_b_delta_zt))
+            m_b = self.m_break_z10_dpl + (self.m_break_z0_dpl - self.m_break_z10_dpl) / (1 + np.exp((z - self.m_break_zt_dpl) / self.m_break_delta_zt_dpl))
 
         # Evaluate unnormalized PDF pointwise
-        dpl_no_norm = DoublePowerlawRedshiftNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.delta)
+        dpl_no_norm = DoublePowerlawRedshiftNoNorm(self.alpha_dpl, self.beta_dpl, self.mmin_dpl, self.mmax_dpl, self.delta_dpl)
         unnorm = dpl_no_norm._pdf(log10_m, m_b)
 
         # Normalize by integrating PDF over full support for each z
-        x = xp.linspace(self.mmin, self.mmax, 1000)
+        x = xp.linspace(self.mmin_dpl, self.mmax_dpl, 1000)
         x_tile = xp.tile(x, (log10_m.shape[0], 1))  # shape (N, 1000)
         m_b_tile = xp.tile(m_b[:, xp.newaxis], (1, 1000))
         unnorm_full = dpl_no_norm._pdf(x_tile, m_b_tile)
@@ -1742,14 +1779,14 @@ class Gamma():
         https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.gamma.html#scipy.stats.gamma
     """
     def __init__(self):
-        self.population_parameters = ['a_gamma', 'theta']
+        self.population_parameters = ['alpha_g', 'beta_g']
 
     def update(self,**kwargs):
-        self.a_gamma = kwargs['a_gamma']
-        self.theta   = kwargs['theta']
+        self.alpha_g = kwargs['alpha_g']
+        self.beta_g  = kwargs['beta_g']
 
     def pdf(self,log10_q):
-        return gamma.pdf(log10_q, a = self.a_gamma, scale = self.theta)
+        return gamma.pdf(log10_q, a = self.alpha_g, scale = self.beta_g)
 
     def log_pdf(self,log10_q):
         xp = get_module_array(log10_q)
@@ -1789,39 +1826,3 @@ class Beta():
         logpdf_vals = xp.where((x >= 0) & (x <= 1), self._log_beta_pdf(x) - xp.log(self.s), -xp.inf)
         return logpdf_vals
 
-
-class DoublePowerlaw_Gaussian():
-    """
-        Class for the primary mass distribution as two powerlaws smoothly attached at a brake point,
-        plus a Gaussian peak.
-        The PDF takes as input the log10 logarithm of the mass.
-    """
-    def __init__(self):
-        self.population_parameters = ['alpha', 'beta', 'mmin', 'mmax', 'm_b', 'delta', 'mu_g', 'sigma_g', 'mix']
-
-    def update(self, **kwargs):
-        for param in self.population_parameters:
-            setattr(self, param, kwargs[param])
-
-    def pdf(self, log10_m):
-        xp = get_module_array(log10_m)
-        dpl_no_norm_class = DoublePowerlawNoNorm(self.alpha, self.beta, self.mmin, self.mmax, self.m_b, self.delta)
-        gaussian_class    = GaussianStationary_truncated(self.mu_g, self.sigma_g, self.mmin, self.mmax)
-        x = xp.linspace(self.mmin, self.mmax, 1000)
-        gaussian_part = gaussian_class.pdf(log10_m)
-        try:
-            norm = xp.trapz(dpl_no_norm_class._pdf(x), x)
-            dpl_part = dpl_no_norm_class._pdf(log10_m) / norm
-        except:
-            # If the normalization fails, return NaN
-            dpl_part = xp.nan
-
-        # Impose the rate to be between [0,1].
-        if (self.mix > 1) or (self.mix < 0):
-            return xp.nan
-        else:
-            return self.mix * dpl_part + (1-self.mix) * gaussian_part
-
-    def log_pdf(self, log10_m):
-        xp = get_module_array(log10_m)
-        return xp.log(self.pdf(log10_m))
