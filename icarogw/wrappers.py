@@ -1724,19 +1724,24 @@ class DoublePowerlawRedshift():
 
 class Johnson():
     """
-        Class for the mass ratio distribution as a Johnsonsu distribution.
+        Class for the primary mass distribution as a Johnsonsu distribution.
         The PDF takes as input the log10 logarithm of the primary mass.
     """
     def __init__(self):
         self.population_parameters = ['skew_j', 'sharp_j', 'peak_j', 'scale_j', 'mmin_j', 'mmax_j']
 
     def update(self,**kwargs):
-        self.a = kwargs["skew_j"]
-        self.b = kwargs["sharp_j"]
-        self.l = kwargs["peak_j"]
-        self.s = kwargs["scale_j"]
-        self.mmin = kwargs["mmin_j"]
-        self.mmax = kwargs["mmax_j"]
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+        # Johnson notation shortcuts
+        self.a = self.skew_j
+        self.b = self.sharp_j
+        self.l = self.peak_j
+        self.s = self.scale_j
+
+        self.mmin = self.mmin_j
+        self.mmax = self.mmax_j
 
         # Precompute constants
         self.inv_s = 1.0 / self.s
@@ -1770,6 +1775,161 @@ class Johnson():
         xp = get_module_array(log10_m)
         logp = self.log_pdf(log10_m)
         return xp.exp(logp)
+
+
+class Johnson_Gaussian():
+    """
+    Johnson SU + Gaussian mixture model.
+
+    PDF defined on log10(m).
+
+    Parameters
+    ----------
+    skew_j      : Johnson skewness
+    sharp_j     : Johnson sharpness
+    peak_j      : Johnson location
+    scale_j     : Johnson scale
+
+    mu_g_j      : Gaussian mean
+    sigma_g_j   : Gaussian std
+
+    mix_j       : Mixing fraction
+                  mix_j = 1   -> pure Johnson
+                  mix_j = 0   -> pure Gaussian
+    """
+
+    def __init__(self):
+
+        self.population_parameters = [
+            'skew_j',
+            'sharp_j',
+            'peak_j',
+            'scale_j',
+            'mmin_j',
+            'mmax_j',
+            'mu_g_j',
+            'sigma_g_j',
+            'mix_j'
+        ]
+
+    def update(self, **kwargs):
+
+        # -------------------------
+        # Store parameters
+        # -------------------------
+
+        for param in self.population_parameters:
+            setattr(self, param, kwargs[param])
+
+        # Johnson notation shortcuts
+        self.a = self.skew_j
+        self.b = self.sharp_j
+        self.l = self.peak_j
+        self.s = self.scale_j
+
+        self.mmin = self.mmin_j
+        self.mmax = self.mmax_j
+
+        # -------------------------
+        # Precompute constants
+        # -------------------------
+
+        self.inv_s = 1.0 / self.s
+        self.log_s = np.log(self.s)
+
+        self.inv_sqrt_2pi = 1.0 / np.sqrt(2 * np.pi)
+
+        # -------------------------
+        # Johnson normalization
+        # -------------------------
+
+        xp = get_module_array(np.array(0.0))
+
+        cdf_min = self._cdf_scalar(self.mmin, xp)
+        cdf_max = self._cdf_scalar(self.mmax, xp)
+
+        self.norm = cdf_max - cdf_min
+        self.log_norm = np.log(self.norm)
+
+    def _cdf_scalar(self, x, xp):
+
+        z = (x - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+
+        return 0.5 * (1 + xp_erf(y / xp.sqrt(2)))
+
+    def johnson_pdf(self, log10_m):
+
+        xp = get_module_array(log10_m)
+
+        z = (log10_m - self.l) * self.inv_s
+        y = self.a + self.b * xp.arcsinh(z)
+
+        logp = (
+            xp.log(self.b)
+            - self.log_s
+            - 0.5 * y**2
+            + xp.log(self.inv_sqrt_2pi)
+            - 0.5 * xp.log1p(z**2)
+            - self.log_norm
+        )
+
+        pdf = xp.exp(logp)
+
+        pdf = xp.where(
+            (log10_m < self.mmin) | (log10_m > self.mmax),
+            0.0,
+            pdf
+        )
+
+        return pdf
+
+    def gaussian_pdf(self, log10_m):
+
+        gaussian = GaussianStationary_truncated(
+            self.mu_g_j,
+            self.sigma_g_j,
+            self.mmin,
+            self.mmax
+        )
+
+        return gaussian.pdf(log10_m)
+
+    def pdf(self, log10_m):
+
+        xp = get_module_array(log10_m)
+
+        # -------------------------
+        # Validate mixing fraction
+        # -------------------------
+
+        if (self.mix_j < 0) or (self.mix_j > 1):
+            return xp.nan
+
+        # -------------------------
+        # Components
+        # -------------------------
+
+        johnson_part = self.johnson_pdf(log10_m)
+
+        gaussian_part = self.gaussian_pdf(log10_m)
+
+        # -------------------------
+        # Mixture
+        # -------------------------
+
+        return (
+            self.mix_j * johnson_part
+            + (1.0 - self.mix_j) * gaussian_part
+        )
+
+    def log_pdf(self, log10_m):
+
+        xp = get_module_array(log10_m)
+
+        pdf_vals = self.pdf(log10_m)
+
+        return xp.log(pdf_vals)
 
 
 class Gamma():
