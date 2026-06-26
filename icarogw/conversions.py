@@ -925,7 +925,7 @@ def detector2source_jacobian_q(z, cosmology):
     ----------
     z:      xp. arrays
             Redshift
-    ms1:    xp. arrays
+    m1s:    xp. arrays
             Primary mass in the source frame
     cosmo:  class from the cosmology module
             Cosmology class from the cosmology module
@@ -965,7 +965,7 @@ def source2detector_jacobian(z, cosmology):
     
 # LISA
 
-def detector2source_jacobian_MBH(z, mass1, q, cosmology):
+def detector2source_jacobian_MBH(z, m1s, q, cosmology):
     '''
     Calculates the detector frame to source frame Jacobian d_det/d_sour.
 
@@ -975,11 +975,51 @@ def detector2source_jacobian_MBH(z, mass1, q, cosmology):
     ----------
     z:      xp. arrays
             Redshift
-    ms1:    xp. arrays
+    m1s:    xp. arrays
             Primary mass in the source frame
+    q:      xp. arrays
+            Mass ratio
     cosmo:  class from the cosmology module
             Cosmology class from the cosmology module
     '''
     xp = get_module_array(z)
     const = xp.power(xp.log10(xp.e), 2)
-    return xp.abs( (1+z) * cosmology.ddl_by_dz_at_z(z) * mass1 * q * 1/const)
+    return xp.abs( (1+z) * cosmology.ddl_by_dz_at_z(z) * m1s * q * 1/const)
+
+def detector2source_jacobian_EMRI_no_q(z, m1s, cosmology):
+    '''
+    Calculates the detector frame to source frame Jacobian d_det/d_sour.
+
+    |J_d->s| = |J_(m1d, dL)->(log(m1s), z)| = (1+z) ddL/dz m1s/log10(e)
+
+    Parameters
+    ----------
+    z:      xp. arrays
+            Redshift
+    m1s:    xp. arrays
+            Primary mass in the source frame
+    cosmo:  class from the cosmology module
+            Cosmology class from the cosmology module
+    '''
+    xp = get_module_array(z)
+    const = xp.log10(xp.e)
+    return xp.abs( (1+z) * cosmology.ddl_by_dz_at_z(z) * m1s * 1/const)
+
+def detector2source_jacobian_EMRI(z, m1s, cosmology):
+    '''
+    Calculates the detector frame to source frame Jacobian d_det/d_sour.
+
+    |J_d->s| = |J_(m1d, m2d, dL)->(log(m1s), m2s, z)| = (1+z)^2 ddL/dz m1s/log10(e)
+
+    Parameters
+    ----------
+    z:      xp. arrays
+            Redshift
+    m1s:    xp. arrays
+            Primary mass in the source frame
+    cosmo:  class from the cosmology module
+            Cosmology class from the cosmology module
+    '''
+    xp = get_module_array(z)
+    const = xp.log10(xp.e)
+    return xp.abs( xp.power(1+z, 2.) * cosmology.ddl_by_dz_at_z(z) * m1s * 1/const)
