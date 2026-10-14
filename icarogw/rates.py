@@ -977,14 +977,18 @@ class CBC_redshift_rate_m_given_redshift(object):
 
 
 class CBC_redshift_rate_m_given_luminosity(object):
-    def __init__(self, cosmology_wrapper, mass_redshift_wrapper, rate_wrapper):
+    def __init__(self, cosmology_wrapper, mass_redshift_wrapper, rate_wrapper, scale_free=True):
         
         self.cw = cosmology_wrapper
         self.mzw = mass_redshift_wrapper
         self.rw = rate_wrapper
+        self.scale_free = scale_free
+
         self.population_parameters = self.cw.population_parameters+self.mzw.population_parameters+self.rw.population_parameters    
         event_parameters = ['mass_1', 'luminosity_distance']
+
         self.PEs_parameters = event_parameters.copy()
+        self.injections_parameters = event_parameters.copy()
             
     def update(self,**kwargs):
         '''
@@ -999,6 +1003,9 @@ class CBC_redshift_rate_m_given_luminosity(object):
         self.mzw.update(**{key: kwargs[key] for key in self.mzw.population_parameters})
         self.rw.update( **{key: kwargs[key] for key in self.rw.population_parameters})
         
+        if not self.scale_free:
+            self.R0 = kwargs['R0']
+        
     def log_rate_PE(self,prior,**kwargs):
         '''
         This method calculates the weights (CBC merger rate per year at detector) for the posterior samples.
@@ -1011,7 +1018,31 @@ class CBC_redshift_rate_m_given_luminosity(object):
         xp = get_module_array(prior)
         z  = self.cw.cosmology.dl2z(kwargs['luminosity_distance'])
         ms = kwargs['mass_1'] / (1.+z) # Convert m from detector to source frame.
+
         log_weights = self.mzw.log_pdf(ms, z) + self.rw.rate.log_evaluate(kwargs['luminosity_distance']) - xp.log(prior) - xp.log1p(z)
+
+        if not self.scale_free:
+            log_weights += xp.log(self.R0)
+
+        return log_weights
+
+    def log_rate_injections(self,prior,**kwargs):
+        '''
+        This method calculates the weights (CBC merger rate per year at detector) for the posterior samples.
+        
+        Parameters
+        ----------
+        prior: array
+            Prior written in terms of the variables identified by self.event_parameters
+        '''
+        xp = get_module_array(prior)
+        z  = self.cw.cosmology.dl2z(kwargs['luminosity_distance'])
+        ms = kwargs['mass_1'] / (1.+z) # Convert m from detector to source frame.
+
+        log_weights = self.mzw.log_pdf(ms, z) + self.rw.rate.log_evaluate(kwargs['luminosity_distance']) - xp.log(prior) - xp.log1p(z)
+
+        if not self.scale_free:
+            log_weights += xp.log(self.R0)
 
         return log_weights
 

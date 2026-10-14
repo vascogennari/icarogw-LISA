@@ -711,6 +711,19 @@ class uniform_redshift_probability(basic_redshift_rate):
     def log_evaluate(self,z):
         tmp = UniformDistribution(self.z_min, self.z_max)
         return tmp.log_pdf(z)
+
+class uniform_distance_probability(basic_redshift_rate):
+    '''
+    Class for a uniform distribution for the redshift probability.
+    The function needs to be converted into a rate by multiplying by the volume factor.
+    '''
+    def __init__(self,dl_min,dl_max):
+        self.dl_min = dl_min
+        self.dl_max = dl_max
+
+    def log_evaluate(self,dl):
+        tmp = UniformDistribution(self.dl_min, self.dl_max)
+        return tmp.log_pdf(dl)
     
 class powerlaw_redshift_probability(basic_redshift_rate):
     '''

@@ -157,6 +157,21 @@ def snr_samples_flat(z, alpha = 1):
     
     return rho_true
 
+def pdet_piecewise_flat(x, alpha_low = 1, alpha_high = 1, x_threshold = 50):
+    """
+    Piecewise-constant detection probability model.
+
+    This function defines the probability that an event is detected
+    as a deterministic function of event parameters.
+    """
+    x = np.asarray(x)
+
+    return np.where(
+        x < x_threshold,
+        alpha_low,
+        alpha_high
+    )
+
 def chirp_mass_noise(Md,rho_obs):
     '''
     Return the dected values of the chirp mass.
